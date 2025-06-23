@@ -9,29 +9,31 @@ from hashlib import (
     sha3_224,
     sha3_256,
     sha3_384,
-    sha3_512
+    sha3_512,
+    md5
 )
 from sys import exit, stderr, stdout
 from pathlib import Path
 from typing import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import TextIOWrapper
 
 
 output_lock = Lock()
 
 parser = ArgumentParser(
-    description="Custom hash calculating command. Author: Marek Pucher",
+    description="Custom hash calculating command.",
     formatter_class=RawTextHelpFormatter
     )
 
-parser.add_argument("filepath",
+parser.add_argument("path",
                     help="Path to a file or directory\n"
                          "If directory, it will recursively compute the hashes"
                          " for all files and directories inside the directory")
 
-parser.add_argument("--alg",
-                    help="The algorithm to calculate hash (default: sha256)\n"
+parser.add_argument("-a",
+                    "--algorithm",
+                    help="The algorithm to compute hash with "
+                         "(default: sha256)\n"
                          "  - sha1\n"
                          "  - sha224\n"
                          "  - sha256\n"
@@ -40,27 +42,33 @@ parser.add_argument("--alg",
                          "  - sha3_224\n"
                          "  - sha3_256\n"
                          "  - sha3_384\n"
-                         "  - sha3_512",
+                         "  - sha3_512\n"
+                         "  - md5",
                     default="sha256")
 
-parser.add_argument("--comp",
-                    help="Hash to compare with",
+parser.add_argument("-c",
+                    "--comp",
+                    help="Hash to compare with, prints either True or False\n"
+                    "If directory is given as a path, it returns the name of a"
+                    " file matching the hash, if no file matches the hash, "
+                    "output is silent.",
                     default=None)
 
-parser.add_argument("--threads",
+parser.add_argument("-t",
+                    "--threads",
                     type=int,
                     default=1,
                     help="Number of threads to use for hashing (default: 1)\n"
                          "Useful for directories with large amount of files")
 
-parser.add_argument("--output",
-                    help="Redirects the output to a specifed file",
+parser.add_argument("-o",
+                    "--output",
+                    help="Redirects the output to a specified file",
                     default=None)
 
 args = parser.parse_args()
 OUTPUT_FILE = open(args.output, "w",
                    encoding="utf-8") if args.output else stdout
-stdout = TextIOWrapper(stdout.buffer, encoding="utf-8")
 
 
 def mb_to_bytes(megabytes: int) -> int:
@@ -87,7 +95,6 @@ def process_dir(hash_func: Callable, dirpath: str) -> None:
 def process_dir_threaded(hash_func: Callable, dirpath:
                          str, max_workers: int = 1) -> None:
     files = gather_files(dirpath)
-
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(calculate_hash, hash_func, filepath, True,
@@ -117,7 +124,7 @@ def calculate_hash(hash_func: Callable, filepath: str,
                 if file_size > mb_to_bytes(512) and args.comp is None and (
                         print_progress):
                     percent = (bytes_read / file_size) * 100
-                    print(f"\rProgress: {percent:.2f}% ", end="", flush=True)
+                    print(f"\rProgress: {percent:.1f}% ", end="", flush=True)
     except FileNotFoundError:
         print(f"Error: File '{filepath}' not found.", file=stderr)
         exit(1)
@@ -141,7 +148,7 @@ def calculate_hash(hash_func: Callable, filepath: str,
             with output_lock:
                 print(calculated_hash, file=OUTPUT_FILE)
         else:
-            print(args.comp, file=OUTPUT_FILE)
+            print(args.comp == calculated_hash, file=OUTPUT_FILE)
             exit(1)
 
 
@@ -156,17 +163,18 @@ def main():
         "sha3_224": sha3_224,
         "sha3_256": sha3_256,
         "sha3_384": sha3_384,
-        "sha3_512": sha3_512
+        "sha3_512": sha3_512,
+        "md5": md5
     }
 
-    alg_name = args.alg.lower()
+    alg_name = args.algorithm.lower()
     if alg_name not in algorithms:
         print(f"Error: Unknown algorithm '{args.alg}'", file=stderr)
         exit(1)
 
     if hash_func is None:
         hash_func = algorithms[alg_name]
-    file_path = Path(args.filepath)
+    file_path = Path(args.path)
     if file_path.is_dir():
         process_dir_threaded(hash_func, file_path.as_posix(), args.threads)
     else:
